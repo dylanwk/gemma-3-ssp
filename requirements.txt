@@ -4,3 +4,4 @@ torch
 accelerate
 pyyaml
 pytest
+pandas

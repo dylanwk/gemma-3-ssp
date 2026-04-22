@@ -37,7 +37,9 @@ def test_load_and_validate_pdfs(dummy_pdfs):
 
     assert "cis-r1.pdf" in output
     assert "cis-r2.pdf" in output
-    assert "Authentication requirements" in output["cis-r1.pdf"]
+    assert isinstance(output["cis-r1.pdf"], list)
+    assert len(output["cis-r1.pdf"]) > 0
+    assert "Authentication requirements" in output["cis-r1.pdf"][0]
 
     # Test invalid file extension
     test_txt_path = os.path.join(os.path.dirname(pdf1), "test.txt")
@@ -80,11 +82,11 @@ element1:
         return [{"generated_text": out_yaml}]
 
     doc_name = "test_doc.pdf"
-    prompt = "dummy prompt"
+    prompts = ["dummy prompt 1", "dummy prompt 2"]
 
     output_dir = os.path.join(tmp_path, "outputs")
     result = extract_kdes_with_llm(
-        prompt, doc_name, mock_pipeline, output_dir=output_dir
+        prompts, doc_name, mock_pipeline, output_dir=output_dir
     )
 
     assert "element1" in result

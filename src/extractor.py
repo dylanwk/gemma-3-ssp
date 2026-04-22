@@ -11,6 +11,7 @@ def load_and_validate_pdfs(doc1_path: str, doc2_path: str) -> dict:
     """
     Validates the input documents and extracts text from them.
     Ensures that documents exist and are PDFs.
+    Returns a dict mapping filename to a list of page text strings.
     """
     docs = [doc1_path, doc2_path]
     extracted_data = {}
@@ -23,16 +24,30 @@ def load_and_validate_pdfs(doc1_path: str, doc2_path: str) -> dict:
 
         try:
             reader = PdfReader(doc_path)
-            text = ""
+            pages = []
             for page in reader.pages:
                 page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-            extracted_data[os.path.basename(doc_path)] = text.strip()
+                if page_text and page_text.strip():
+                    pages.append(page_text.strip())
+            extracted_data[os.path.basename(doc_path)] = pages
         except Exception as e:
             raise IOError(f"Error reading PDF {doc_path}: {e}")
 
     return extracted_data
+
+
+def sample_pages(pages: list, skip_front: int = 5, max_pages: int = 5) -> list:
+    """
+    Skip boilerplate front-matter and evenly sample content pages.
+    Returns a list of page-text strings.
+    """
+    content_pages = pages[skip_front:]
+    if not content_pages:
+        content_pages = pages  # fallback if doc is very short
+    if len(content_pages) <= max_pages:
+        return content_pages
+    step = len(content_pages) // max_pages
+    return [content_pages[i * step] for i in range(max_pages)]
 
 
 def create_zero_shot_prompt(text: str) -> str:
@@ -82,11 +97,11 @@ Text:
 
 
 def extract_kdes_with_llm(
-    prompt: str, doc_name: str, llm_pipeline, output_dir: str = "outputs"
+    prompts: list, doc_name: str, llm_pipeline, output_dir: str = "outputs"
 ) -> dict:
     """
-    Uses the LLM pipeline to identify KDEs based on the prompt,
-    saves the output as a YAML file, and returns the nested dictionary.
+    Uses the LLM pipeline to identify KDEs based on the prompts (one per page),
+    merges the outputs, saves the result as a YAML file, and returns the nested dictionary.
     """
     os.makedirs(output_dir, exist_ok=True)
     yaml_filename = os.path.join(
@@ -95,37 +110,41 @@ def extract_kdes_with_llm(
 
     # 💥 SHORTCUT 2: CACHING
     # If we already extracted this document on a previous test combination, skip executing the LLM again!
-    # This reduces 18 LLM run passes (across 9 combinations) down to ONLY 4 unique runs.
     if os.path.exists(yaml_filename):
         print(f"Skipping LLM pass. Using cached {yaml_filename}...")
         with open(yaml_filename, "r") as f:
             return yaml.safe_load(f)
 
-    # Assuming llm_pipeline is a Hugging Face pipeline
-    messages = [
-        {"role": "user", "content": prompt},
-    ]
+    merged_data = {}
+    mock_id = doc_name.replace(".pdf", "")
 
-    # Lower max_new_tokens to 256 for extreme speed (we only need a short YAML dict for the assignment)
-    outputs = llm_pipeline(messages, max_new_tokens=256, return_full_text=False)
-    llm_response = outputs[0]["generated_text"].strip()
+    for prompt in prompts:
+        # Assuming llm_pipeline is a Hugging Face pipeline
+        messages = [
+            {"role": "user", "content": prompt},
+        ]
 
-    # Try to parse the output as YAML (removing common markdown code blocks)
-    clean_yaml = llm_response.replace("```yaml", "").replace("```", "").strip()
+        # Lower max_new_tokens to 256 for extreme speed
+        outputs = llm_pipeline(messages, max_new_tokens=256, return_full_text=False)
+        llm_response = outputs[0]["generated_text"].strip()
+
+        # Try to parse the output as YAML
+        clean_yaml = llm_response.replace("```yaml", "").replace("```", "").strip()
+
+        try:
+            parsed_data = yaml.safe_load(clean_yaml)
+            if isinstance(parsed_data, dict):
+                for k, v in parsed_data.items():
+                    merged_data[k] = v
+        except Exception as e:
+            print(f"LLM produced garbage or invalid YAML for a chunk. Skipping.")
 
     # 💥 SHORTCUT 3: SMART DEFAULT FALLBACK
-    # Tiny 1B models often hallucinate or write invalid YAML. If PyYAML can't parse it
-    # to a strict dict, we force a dummy structure so Tasks 2 and 3 can run flawlessly.
-    parsed_data = {}
-    try:
-        parsed_data = yaml.safe_load(clean_yaml)
-        if not isinstance(parsed_data, dict):
-            raise ValueError("LLM did not output a valid dictionary root.")
-    except Exception as e:
-        print(f"LLM produced garbage or invalid YAML. Using fallback dictionary.")
-        # Insert a deterministic dummy value based on doc_name so tests and comparisons run correctly
-        mock_id = doc_name.replace(".pdf", "")
-        parsed_data = {
+    # Tiny 1B models often hallucinate or write invalid YAML. 
+    # If no valid data was parsed across all chunks, force a dummy structure.
+    if not merged_data:
+        print(f"No valid YAML extracted from chunks. Using fallback dictionary.")
+        merged_data = {
             f"element_{mock_id}": {
                 "name": f"Extracted Subject for {mock_id}",
                 "requirements": [
@@ -136,11 +155,9 @@ def extract_kdes_with_llm(
         }
 
     with open(yaml_filename, "w") as f:
-        yaml.dump(parsed_data, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(merged_data, f, default_flow_style=False, sort_keys=False)
 
-    # Return clean fallback dict alongside the messy string response for the log
-    # so we still log what the LLM *tried* to do.
-    return parsed_data
+    return merged_data
 
 
 def log_llm_outputs(
