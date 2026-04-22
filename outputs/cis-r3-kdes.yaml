@@ -1,0 +1,12 @@
+KDE1:
+- name: Terms of Use
+- requirements:
+  - 'see the below link for our current terms of use: https://www.cisecurity.org/cis-securesuite/cis-securesuite-membership-terms-of-use/'
+KDE2:
+- name: Table of Contents
+- requirements:
+  - Terms of Use
+  - Table of Contents
+KDE3:
+- name: Overview
+- requirements: []

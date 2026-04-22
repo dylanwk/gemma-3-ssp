@@ -1,0 +1,9 @@
+KDE1:
+- name: Terms of Use
+- requirements:
+  - 'see the below link for our current terms of use: https://www.cisecurity.org/cis-securesuite/cis-securesuite-membership-terms-of-use/'
+KDE2:
+- name: CIS Benchmark
+- requirements:
+  - host a CIS Benchmark in ANY format (PDF, etc.) on a 3rd party (non-CIS owned)
+    site.
