@@ -5,3 +5,4 @@ accelerate
 pyyaml
 pytest
 pandas
+reportlab
